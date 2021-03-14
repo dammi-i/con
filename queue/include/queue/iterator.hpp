@@ -1,29 +1,29 @@
-#pragma once
+#ifndef CON_ITERATOR_HPP
+#define CON_ITERATOR_HPP
+#include <compare>
 #include <iterator>
 
 namespace con {
 template <class T> class rnd_iterator {
-  T *m_Ptr;
 
 public:
+  // clang-format off
+  T* m_Ptr;
   /*
    * type aliases
    */
+  // clang-format on
   using value_type = T;
-  using iterator_type = rnd_iterator<T>;
+  using iterator_type = rnd_iterator<value_type>;
   using iterator_category = std::random_access_iterator_tag;
   using pointer = value_type *;
   using const_pointer = const pointer;
   using difference_type = std::ptrdiff_t;
-  using reference = T &;
-  using const_reference = const reference;
+  using reference = value_type &;
   /*
    * constructors
    */
-  rnd_iterator() noexcept : m_Ptr(nullptr) {}
-  explicit rnd_iterator(const rnd_iterator<T> &other) noexcept
-      : m_Ptr(other.m_Ptr) {}
-  explicit rnd_iterator(pointer p) noexcept : m_Ptr(p) {}
+  explicit rnd_iterator(T *p) noexcept : m_Ptr(p) {}
   /*
    * access operators
    */
@@ -33,19 +33,15 @@ public:
   /*
    * increment/decrement and assign operators
    */
-  rnd_iterator &operator=(pointer oth) {
-    m_Ptr = oth;
+  iterator_type &operator+=(difference_type n) {
+    m_Ptr += n;
     return *this;
   }
-  rnd_iterator &operator+=(pointer oth) {
-    m_Ptr += oth;
+  iterator_type &operator-=(difference_type n) {
+    m_Ptr += n;
     return *this;
   }
-  rnd_iterator &operator-=(pointer oth) {
-    m_Ptr -= oth;
-    return *this;
-  }
-  rnd_iterator operator++() {
+  rnd_iterator &operator++() {
     ++m_Ptr;
     return *this;
   }
@@ -63,5 +59,21 @@ public:
     m_Ptr--;
     return temp;
   }
+
+  constexpr auto operator<=>(const iterator_type &rhs) noexcept = default;
+
+  friend iterator_type operator+(const iterator_type &it, difference_type n) {
+    return iterator_type(it.m_Ptr + n);
+  }
+  friend iterator_type operator+(difference_type n, const iterator_type &it) {
+    return iterator_type(it.m_Ptr + n);
+  }
+  friend iterator_type operator-(const iterator_type &it, difference_type n) {
+    return iterator_type(it.m_Ptr - n);
+  }
+  friend iterator_type operator-(difference_type n, const iterator_type &it) {
+    return iterator_type(it.m_Ptr - n);
+  }
 };
 } // namespace con
+#endif
