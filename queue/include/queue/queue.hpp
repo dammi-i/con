@@ -56,7 +56,6 @@ class queue {
 
   void m_DefaultAlloc(std::size_t x = 4) {
     m_Capacity = x;
-    m_Size = x;
     m_RawData = alloc_traits::allocate(m_Alloc, m_Capacity);
   }
 
