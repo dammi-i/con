@@ -25,7 +25,7 @@ class queue {
   void m_ReallocAnyway(std::size_t t_NewCapacity) {
     T *f_temp = alloc_traits::allocate(m_Alloc, t_NewCapacity);
     std::size_t count{0};
-    if (m_Size = 0) {
+    if (m_Size == 0) {
       m_DefaultAlloc();
     } else {
       try {
