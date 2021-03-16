@@ -229,11 +229,9 @@ class queue {
   using reverse_iterator = std::reverse_iterator<iterator>;
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-  constexpr queue() noexcept { m_DefaultAlloc(); }
+  constexpr queue() noexcept = default;
 
-  constexpr explicit queue(const Allocator &alloc) noexcept : m_Alloc(alloc) {
-    m_DefaultAlloc();
-  }
+  constexpr explicit queue(const Allocator &alloc) noexcept : m_Alloc(alloc) {}
 
   explicit constexpr queue(size_type count, const value_type &vl = {},
                            const Allocator &alloc = {})
