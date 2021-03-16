@@ -1,9 +1,8 @@
 #ifndef CON_QUEUE_HPP
 #define CON_QUEUE_HPP
-#include "iterator.hpp"
 #include <algorithm>
 #include <cassert>
-#include <concepts.h>
+#include <compare>
 #include <initializer_list>
 #include <iostream>
 #include <iterator>
@@ -13,34 +12,36 @@
 #include <utility>
 
 namespace con {
-template <class T, class Allocator = std::allocator<T>> class queue {
+template <class T, class Allocator = std::allocator<T> >
+class queue {
   T *m_RawData = nullptr;
+  std::size_t m_Head = 0;
   std::size_t m_Size = 0;
   std::size_t m_Capacity = 0;
   [[no_unique_address]] Allocator m_Alloc;
-  std::allocator_traits<Allocator> m_AllocTraits;
+
+  using alloc_traits = std::allocator_traits<Allocator>;
 
   void m_ReallocAnyway(std::size_t t_NewCapacity) {
-    using alloc_traits = std::allocator_traits<Allocator>;
     T *f_temp = alloc_traits::allocate(m_Alloc, t_NewCapacity);
     std::size_t count{0};
     try {
       for (; count < m_Size; count++) {
         alloc_traits::construct(m_Alloc, f_temp + count,
-                                std::move_if_noexcept(m_RawData[count]));
-        m_AllocTraits.destroy(m_Alloc, m_RawData[count]);
+                                std::move_if_noexcept(*(m_RawData + count)));
+        alloc_traits::destroy(m_Alloc, m_RawData + count);
       }
-      alloc_traits::deallocate(m_Alloc, m_RawData);
-      m_RawData = f_temp;
+      alloc_traits::deallocate(m_Alloc, m_RawData, m_Capacity);
+      std::exchange(m_RawData, f_temp);
     } catch (...) {
-      for (std::size_t i = count; i > 0; i++) {
+      for (std::size_t i = count; i > 0; i--) {
         alloc_traits::destroy(m_Alloc, f_temp + (i - 1));
       }
       alloc_traits::deallocate(m_Alloc, f_temp, t_NewCapacity);
       throw;
     }
 
-    for (std::size_t i = m_Size; i > 0; i++) {
+    for (std::size_t i = m_Size; i > 0; i--) {
       alloc_traits::destroy(m_Alloc, m_RawData + (i - 1));
     }
 
@@ -48,43 +49,25 @@ template <class T, class Allocator = std::allocator<T>> class queue {
     m_Capacity = t_NewCapacity;
     m_RawData = f_temp;
   }
-  void m_Realloc(std::size_t t_NewCapacity) {
-    if (t_NewCapacity > m_Capacity) {
-      m_ReallocAnyway(t_NewCapacity);
-    } else {
-      return;
-    }
+
+  void m_DefaultAlloc(std::size_t x = 4) {
+    m_Capacity = x;
+    m_RawData = alloc_traits::allocate(m_Alloc, m_Capacity);
   }
-  void m_ShiftToLeft() {
-    for (std::size_t i = 0; i < m_Size; i++) {
-      new (&m_RawData[i]) T(std::move_if_noexcept(m_RawData[i + 1]));
-    }
-  }
-  template <class F>
-  void m_ShiftFromTo(std::size_t from, std::size_t to, F &&func) {
-    for (; from < to; from++) {
-      new (&m_RawData[from])
-          T(std::move_if_noexcept(m_RawData[func(from, to)]));
-    }
-  }
-  template <class It> void m_ShiftRangeFromTo(It from, It to) {
-    for (; from != to; from++) {
-      new (std::addressof(*from))
-          T(std::move_if_noexcept(*(from + (to - from))));
-    }
-  }
-  template <class Iter> void m_DestroyRange(Iter beg, Iter end) {
+
+  template <class Iter>
+  void m_DestroyRange(Iter beg, Iter end) {
     for (; beg != end; beg++) {
-      m_AllocTraits.destroy(m_Alloc, std::addressof(*beg));
+      alloc_traits::destroy(m_Alloc, std::addressof(*beg));
     }
   }
   void m_CheckOrAlloc(std::size_t t_Size) {
-    if (t_Size >= m_Capacity) {
-      m_ReallocAnyway(m_Capacity * 2);
+    if (t_Size > m_Capacity) {
+      m_ReallocAnyway(m_Capacity * 1.5);
     }
   }
 
-public:
+ public:
   using value_type = std::remove_cv_t<T>;
   using allocator_type = Allocator;
   using size_type = decltype(m_Size);
@@ -94,141 +77,304 @@ public:
   using pointer = typename std::allocator_traits<Allocator>::pointer;
   using const_pointer =
       typename std::allocator_traits<Allocator>::const_pointer;
-  using iterator = con::rnd_iterator<value_type>;
-  using const_iterator = con::rnd_iterator<const value_type>;
+  struct rnd_iterator {
+    pointer m_Ptr;
+    /*
+     * type aliases
+     */
+    using iterator_category = std::random_access_iterator_tag;
+    using difference_type = difference_type;
+    using value_type = std::remove_cv_t<T>;
+    /*
+     * constructors
+     */
+    explicit rnd_iterator(pointer p) noexcept : m_Ptr(p) {}
+    /*
+     * access operators
+     */
+    reference operator*() { return *m_Ptr; }
+    reference operator[](size_type idx) { return m_Ptr[idx]; }
+    pointer operator->() { return m_Ptr; }
+    /*
+     * increment/decrement and assign operators
+     */
+    rnd_iterator &operator+=(difference_type n) {
+      m_Ptr += n;
+      return *this;
+    }
+    rnd_iterator &operator-=(difference_type n) {
+      m_Ptr += n;
+      return *this;
+    }
+    rnd_iterator &operator++() {
+      ++m_Ptr;
+      return *this;
+    }
+    rnd_iterator operator++(int) {
+      auto temp = *this;
+      m_Ptr++;
+      return temp;
+    }
+    rnd_iterator &operator--() {
+      --m_Ptr;
+      return *this;
+    }
+    rnd_iterator operator--(int) {
+      auto temp = *this;
+      m_Ptr--;
+      return temp;
+    }
+
+    constexpr auto operator<=>(const rnd_iterator &rhs) const noexcept =
+        default;
+
+    difference_type operator-(const rnd_iterator &it) {
+      return (m_Ptr - it.m_Ptr);
+    }
+
+    friend rnd_iterator operator+(const rnd_iterator &it, difference_type n) {
+      return rnd_iterator(it.m_Ptr + n);
+    }
+    friend rnd_iterator operator+(difference_type n, const rnd_iterator &it) {
+      return rnd_iterator(it.m_Ptr + n);
+    }
+    friend rnd_iterator operator-(const rnd_iterator &it, difference_type n) {
+      return rnd_iterator(it.m_Ptr - n);
+    }
+    friend rnd_iterator operator-(difference_type n, const rnd_iterator &it) {
+      return rnd_iterator(it.m_Ptr - n);
+    }
+  };
+  struct rnd_const_iterator {
+    // clang-format off
+      const_pointer m_Ptr;
+      /*
+       * type aliases
+       */
+    // clang-format on
+    using iterator_category = std::random_access_iterator_tag;
+    using difference_type = difference_type;
+    using value_type = std::remove_cv_t<T>;
+    /*
+     * constructors
+     */
+    explicit rnd_const_iterator(pointer p) noexcept : m_Ptr(p) {}
+    /*
+     * access operators
+     */
+    const_reference operator*() { return *m_Ptr; }
+    const_reference operator[](size_type idx) { return m_Ptr[idx]; }
+    const_pointer operator->() { return m_Ptr; }
+    /*
+     * increment/decrement and assign operators
+     */
+    rnd_const_iterator &operator+=(difference_type n) {
+      m_Ptr += n;
+      return *this;
+    }
+    rnd_const_iterator &operator-=(difference_type n) {
+      m_Ptr += n;
+      return *this;
+    }
+    rnd_const_iterator &operator++() {
+      ++m_Ptr;
+      return *this;
+    }
+    rnd_const_iterator operator++(int) {
+      auto temp = *this;
+      m_Ptr++;
+      return temp;
+    }
+    rnd_const_iterator &operator--() {
+      --m_Ptr;
+      return *this;
+    }
+    rnd_const_iterator operator--(int) {
+      auto temp = *this;
+      m_Ptr--;
+      return temp;
+    }
+
+    constexpr auto operator<=>(const rnd_iterator &rhs) const noexcept =
+        default;
+
+    difference_type operator-(const rnd_iterator &it) {
+      return (m_Ptr - it.m_Ptr);
+    }
+
+    friend rnd_const_iterator operator+(const rnd_iterator &it,
+                                        difference_type n) {
+      return rnd_const_iterator(it.m_Ptr + n);
+    }
+    friend rnd_const_iterator operator+(difference_type n,
+                                        const rnd_iterator &it) {
+      return rnd_const_iterator(it.m_Ptr + n);
+    }
+    friend rnd_const_iterator operator-(const rnd_iterator &it,
+                                        difference_type n) {
+      return rnd_const_iterator(it.m_Ptr - n);
+    }
+    friend rnd_const_iterator operator-(difference_type n,
+                                        const rnd_iterator &it) {
+      return rnd_const_iterator(it.m_Ptr - n);
+    }
+  };
+  using iterator = rnd_iterator;
+  using const_iterator = rnd_const_iterator;
   using reverse_iterator = std::reverse_iterator<iterator>;
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-  constexpr queue() = default;
+  constexpr queue() noexcept { m_DefaultAlloc(); }
 
-  explicit queue(size_type cap = 5, const Allocator &alloc = Allocator{})
-      : m_Alloc(alloc), m_Size(0), m_Capacity(cap),
-        m_RawData(m_Alloc.allocate(m_Capacity)) {}
+  constexpr explicit queue(const Allocator &alloc) noexcept : m_Alloc(alloc) {
+    m_DefaultAlloc();
+  }
+
+  explicit constexpr queue(size_type count, const value_type &vl = {},
+                           const Allocator &alloc = {})
+      : m_Alloc(alloc), m_Size(count), m_Capacity(count) {
+    m_DefaultAlloc(count);
+    std::uninitialized_fill_n(m_RawData, count, vl);
+  }
 
   explicit constexpr queue(std::initializer_list<T> init,
                            const Allocator &alloc = Allocator{})
-      : queue(init.begin(), init.end()) {}
+      : queue(init.begin(), init.end(), alloc) {}
+
+  explicit constexpr queue(queue &&q) noexcept : m_Alloc(q.get_allocator()) {
+    swap(*this, std::move(q));
+  }
+
+  explicit constexpr queue(queue &&q, const Allocator &alloc) noexcept(
+      alloc_traits::is_always_equal::value)
+      : m_Alloc(alloc) {
+    if (alloc_traits::is_always_equal::value || m_Alloc == q.get_allocator()) {
+      swap(*this, std::move(q));
+    } else {
+      m_DefaultAlloc(q.size());
+      std::uninitialized_move(q.begin(), q.end(), m_RawData);
+      m_Capacity = q.capacity();
+      m_Size = q.size();
+    }
+  }
 
   explicit constexpr queue(const queue<value_type> &oth)
       : queue(oth.begin(), oth.end()) {}
 
-  explicit constexpr queue(const queue<value_type> &oth, const Allocator &a)
-      : queue(oth.begin(), oth.end(), a) {}
+  explicit constexpr queue(const queue<value_type> &oth, const Allocator &alloc)
+      : queue(oth.begin(), oth.end(), alloc) {}
 
-  template <std::input_iterator It, std::sentinel_for<It> S>
-  constexpr queue(It begin, S end, const Allocator &a = {}) : m_Alloc{a} {
-    while (begin != end)
-      enqueue(*begin++);
+  template <class It>
+  constexpr queue(It begin, It end, Allocator a = {})
+      : m_RawData(alloc_traits::allocate(a, 4)), m_Capacity(4), m_Alloc(a) {
+    while (begin != end) enqueue(*begin++);
   }
-  template <std::forward_iterator It, std::sentinel_for<It> S>
-  constexpr queue(It begin, S end, const Allocator &a = {}) : m_Alloc{a} {
-    reserve(std::distance(begin, end));
-    std::uninitialized_copy(begin, end, m_RawData);
-    m_Size = m_Capacity;
-  }
-  explicit queue(const queue<value_type> &&oth) = delete;
-  iterator begin() noexcept { return iterator(m_RawData); }
-  iterator end() noexcept { return iterator(m_RawData + size()); }
+  iterator begin() noexcept { return iterator(m_RawData + m_Head); }
+  iterator end() noexcept { return iterator(m_RawData + m_Size); }
+
   reverse_iterator rbegin() noexcept { return reverse_iterator(end()); }
   reverse_iterator rend() noexcept { return reverse_iterator(begin()); }
 
-  const_iterator begin() const noexcept { return const_iterator(m_RawData); }
-  const_iterator end() const noexcept {
-    return const_iterator(m_RawData + size());
+  iterator begin() const noexcept { return iterator(m_RawData + m_Head); }
+  iterator end() const noexcept { return iterator(m_RawData + m_Size); }
+
+  reverse_iterator rbegin() const noexcept {
+    return reverse_iterator(m_RawData + m_Size);
   }
-  const_reverse_iterator rbegin() const noexcept {
-    return const_reverse_iterator(m_RawData + size());
-  }
-  const_reverse_iterator rend() const noexcept {
-    return const_reverse_iterator(m_RawData);
+  reverse_iterator rend() const noexcept {
+    return reverse_iterator(m_RawData + m_Head);
   }
 
-  const_iterator cbegin() const noexcept { return const_iterator(m_RawData); }
+  const_iterator cbegin() const noexcept {
+    return const_iterator(m_RawData + m_Head);
+  }
   const_iterator cend() const noexcept {
     return const_iterator(m_RawData + size());
   }
   const_reverse_iterator crbegin() const noexcept { return rbegin(); }
   const_reverse_iterator crend() const noexcept { return rend(); }
 
-  bool empty() const noexcept { return size() == 0; }
-  size_type size() const noexcept { return m_Size; }
-  size_type capacity() const noexcept { return m_Capacity; }
-  const_pointer data() const { return m_RawData; }
+  constexpr bool empty() const noexcept { return size() == 0; }
+
+  constexpr size_type size() const noexcept { return (m_Size - m_Head); }
+
+  constexpr size_type max_size() const noexcept {
+    return (std::numeric_limits<size_type>::max() / sizeof(value_type));
+  }
+  constexpr allocator_type get_allocator() const noexcept { return m_Alloc; }
+
+  constexpr size_type capacity() const noexcept { return m_Capacity; }
+
+  const_reference data() const { return m_RawData; }
+
   reference data() { return m_RawData; }
-  void clear() {
+
+  const_reference front() const { return *begin(); }
+  const_reference back() const { return *end(); }
+
+  reference front() { return *begin(); }
+  reference back() { return *end(); }
+
+  void clear() noexcept {
     for (size_type i = 0; i < size(); i++) {
-      m_AllocTraits.destroy(m_Alloc, std::addressof(m_RawData[i]));
+      alloc_traits::destroy(m_Alloc, m_RawData + i);
     }
     m_Size = 0;
   }
+
   void reserve(size_type cp) { m_CheckOrAlloc(cp); }
+
   void resize(size_type sz) {
-    m_Size = sz;
-    m_CheckOrAlloc(sz);
+    if (sz < size()) {
+      m_DestroyRange(begin() + sz, end());
+      m_Size = sz;
+    } else if (sz > size()) {
+      for (size_type i = size(); i < sz; i++) enqueue(value_type{});
+    }
   }
+
   void erase(iterator val) {
     if (val != end()) {
-      difference_type x = val - begin();
-      pointer p = m_RawData + x;
-      m_AllocTraits.destroy(m_Alloc, std::addressof(*val));
-      m_ShiftFromTo(std::distance(begin(), iterator(p)), size(),
-                    [](auto l, [[maybe_unused]] auto _) { return l + 1; });
-      m_Size--;
+      erase(val, val + 1);
     } else {
       return;
     }
   }
   void erase(iterator first, iterator last) {
-    assert(first <= last && "queue::erase invalid range");
-    m_DestroyRange(first, last);
-    m_ShiftRangeFromTo(first, last);
-    m_Size -= std::distance(first, last);
-  }
-  void erase(reverse_iterator first, reverse_iterator last) {
-    assert(first <= last && "queue::erase invalid range");
-    m_DestroyRange(first, last);
-    m_ShiftRangeFromTo(first, last);
-    m_Size -= std::distance(first, last);
-  }
-  void erase(reverse_iterator val) {
-    if (val != rend()) {
-      m_AllocTraits.destroy(m_Alloc, std::addressof(*val));
-      m_ShiftFromTo(std::distance(val, rend()) - 1, size(),
-                    [](auto l, [[maybe_unused]] auto _) { return l + 1; });
-      m_Size--;
+    if (last == end()) {
+      for (; first != last; first++) {
+        alloc_traits::destroy(m_Alloc, std::addressof(*first));
+        m_Size--;
+      }
     } else {
-      return;
+      std::move(last, end(), first);
+      for (; first != last; first++) {
+        alloc_traits::destroy(m_Alloc, std::addressof(*first));
+        m_Size--;
+      }
     }
   }
-  void erase(const value_type &obj) { erase(std::find(begin(), end(), obj)); }
-  void rerase(const value_type &obj) {
-    erase(std::find(rbegin(), rend(), obj));
-  }
 
-  void enqueue(const value_type &oth) requires(
-      std::is_copy_constructible<value_type>::value) {
-    m_CheckOrAlloc(size());
-    new (&m_RawData[m_Size++]) value_type(oth);
-  }
-  void enqueue(value_type &&oth) requires(
-      std::is_move_constructible<value_type>::value) {
-    m_CheckOrAlloc(size());
-    new (&m_RawData[m_Size++]) value_type(std::move(oth));
-  }
+  void enqueue(const value_type &oth) { emplace(oth); }
 
-  value_type dequeue() requires(std::is_destructible<value_type>::value) {
-    --m_Size;
+  void enqueue(value_type &&oth) { emplace(std::move(oth)); }
+
+  value_type dequeue() {
     value_type temp = m_RawData[0];
-    m_AllocTraits.destory(m_Alloc, std::addressof(m_RawData[0]));
-    m_ShiftToLeft();
+    alloc_traits::destroy(m_Alloc, std::addressof(m_RawData[0]));
+    m_Head++;
     return temp;
   }
 
-  template <class... Args> void emplace(Args &&...args) {
-    enqueue(value_type(std::forward<Args>(args)...));
+  template <class... Args>
+  void emplace(Args &&...args) {
+    m_CheckOrAlloc(size());
+    alloc_traits::construct(m_Alloc, (m_RawData + m_Size),
+                            std::forward<Args>(args)...);
+    m_Size++;
   }
 
-  value_type at(size_type index) const {
+  const_reference at(size_type index) const {
     if (index >= size()) {
       throw std::range_error("out of bounds queue");
     } else {
@@ -242,34 +388,44 @@ public:
       return m_RawData[index];
     }
   }
-  value_type operator[](size_type index) const { return m_RawData[index]; }
+  const_reference operator[](size_type index) const { return m_RawData[index]; }
   reference operator[](size_type index) { return m_RawData[index]; }
 
-  queue<value_type> &operator=(const queue<value_type> &oth) {
-    if (&oth != this) {
+  constexpr queue<value_type> &operator=(queue<value_type> &oth) {
+    swap(*this, oth);
+    return *this;
+  }
+  constexpr queue<value_type> &operator=(queue<value_type> &&oth) noexcept(
+      alloc_traits::propagate_on_container_move_assignment::value ||
+      alloc_traits::is_always_equal::value) {
+    if (alloc_traits::propagate_on_container_move_assignment::value) {
       clear();
-      m_Size = oth.size();
-      m_CheckOrAlloc(m_Size);
-      std::uninitialized_copy(oth.begin(), oth.end(), m_RawData);
+      m_Alloc = std::move(oth.get_allocator());
+      swap(*this, std::move(oth));
+    } else if (alloc_traits::is_always_equal::value ||
+               m_Alloc == oth.get_allocator()) {
+      swap(*this, std::move(oth));
+    } else {
+      m_CheckOrAlloc(oth.size());
+      std::uninitialized_move(oth.begin(), oth.end(), m_RawData + m_Head);
     }
     return *this;
   }
-  queue<value_type> &operator=(queue<value_type> &&oth) {
-    if (&oth != this) {
-      clear();
-      m_Size = oth.size();
-      m_CheckOrAlloc(m_Size);
-      std::uninitialized_move(oth.begin(), oth.end(), m_RawData);
-      oth.~queue();
-    }
-    return *this;
+
+  friend constexpr void swap(queue &lhs, queue &&rhs) noexcept {
+    using std::swap;
+    swap(lhs.m_RawData, rhs.m_RawData);
+    swap(lhs.m_Size, rhs.m_Size);
+    swap(lhs.m_Capacity, rhs.m_Capacity);
   }
-  ~queue() {
+
+  ~queue() noexcept {
     clear();
-    m_Alloc.deallocate(m_RawData, m_Capacity);
+    alloc_traits::deallocate(m_Alloc, m_RawData, m_Capacity);
     std::exchange(m_RawData, nullptr);
-    std::exchange(m_Size, 0);
+    std::exchange(m_Capacity, 0);
+    std::exchange(m_Head, 0);
   }
 };
-} // namespace con
+}  // namespace con
 #endif
