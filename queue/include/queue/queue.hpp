@@ -25,33 +25,38 @@ class queue {
   void m_ReallocAnyway(std::size_t t_NewCapacity) {
     T *f_temp = alloc_traits::allocate(m_Alloc, t_NewCapacity);
     std::size_t count{0};
-    try {
-      for (; count < m_Size; count++) {
-        alloc_traits::construct(m_Alloc, f_temp + count,
-                                std::move_if_noexcept(*(m_RawData + count)));
-        alloc_traits::destroy(m_Alloc, m_RawData + count);
+    if (m_Size = 0) {
+      m_DefaultAlloc();
+    } else {
+      try {
+        for (; count < m_Size; count++) {
+          alloc_traits::construct(m_Alloc, f_temp + count,
+                                  std::move_if_noexcept(*(m_RawData + count)));
+          alloc_traits::destroy(m_Alloc, m_RawData + count);
+        }
+        alloc_traits::deallocate(m_Alloc, m_RawData, m_Capacity);
+        std::exchange(m_RawData, f_temp);
+      } catch (...) {
+        for (std::size_t i = count; i > 0; i--) {
+          alloc_traits::destroy(m_Alloc, f_temp + (i - 1));
+        }
+        alloc_traits::deallocate(m_Alloc, f_temp, t_NewCapacity);
+        throw;
       }
+
+      for (std::size_t i = m_Size; i > 0; i--) {
+        alloc_traits::destroy(m_Alloc, m_RawData + (i - 1));
+      }
+
       alloc_traits::deallocate(m_Alloc, m_RawData, m_Capacity);
-      std::exchange(m_RawData, f_temp);
-    } catch (...) {
-      for (std::size_t i = count; i > 0; i--) {
-        alloc_traits::destroy(m_Alloc, f_temp + (i - 1));
-      }
-      alloc_traits::deallocate(m_Alloc, f_temp, t_NewCapacity);
-      throw;
+      m_Capacity = t_NewCapacity;
+      m_RawData = f_temp;
     }
-
-    for (std::size_t i = m_Size; i > 0; i--) {
-      alloc_traits::destroy(m_Alloc, m_RawData + (i - 1));
-    }
-
-    alloc_traits::deallocate(m_Alloc, m_RawData, m_Capacity);
-    m_Capacity = t_NewCapacity;
-    m_RawData = f_temp;
   }
 
   void m_DefaultAlloc(std::size_t x = 4) {
     m_Capacity = x;
+    m_Size = x;
     m_RawData = alloc_traits::allocate(m_Alloc, m_Capacity);
   }
 
@@ -62,7 +67,7 @@ class queue {
     }
   }
   void m_CheckOrAlloc(std::size_t t_Size) {
-    if (t_Size > m_Capacity) {
+    if (t_Size >= m_Capacity) {
       m_ReallocAnyway(m_Capacity * 1.5);
     }
   }
